@@ -1,0 +1,702 @@
+#!/bin/bash
+
+# encrypt for code repositories
+# 脚本检查完毕，语法逻辑无误
+
+repo_crypt_command="openssl enc -chacha20 -pbkdf2 -iter 123456 -md sha256"
+
+# 比较openssl的版本号
+printf '%s\n' "1.1.1" $(openssl version | awk '{print $2}') | sort -V -C || {
+	echo "the openssl version $(openssl version | awk '{print $2}') is less than 1.1.1, and this script will exit 1."
+	exit 1
+}
+: << "EOF"
+salt_length=0
+printf '%s\n' "3.0.0" $(openssl version | awk '{print $2}') | sort -V -C || {
+	# openssl v1.1.1 Salt值会保留到密文里面，需去除Salt值
+	salt_length=$(cat /dev/null | openssl chacha20 -pbkdf2 -pass pass:0 | wc -c)
+}
+EOF
+
+# 文本加密
+code_encrypt_file=(
+)
+
+# 二进制文件加密
+bin_encrypt_file=(
+)
+
+# Shell脚本加密
+sh_encrypt_file=(
+server_init.sh
+config_xray_blog.sh
+)
+
+# 加密解密操作备份文件路径
+crypt_backup_file=".bakcrypt.tgz"
+# 仓库密码文件
+encrypt_pass_file=".encrypt.pass"
+# Shell脚本加密的Salt值(运行 openssl rand -hex 8 生成之)
+encrypt_salt_shell="7e4e62f0df7791b2"
+
+# 采用openssl做加密解密操作，chacha20对称加密算法(流加密)，pbkdf2密钥生成算法
+# 进程创建和销毁都是很耗时的操作，msys2的命令耗时有大部分在此，应尽量避免之
+
+salt_length=$(cat /dev/null | $repo_crypt_command -pass pass:0 -S $encrypt_salt_shell | wc -c)
+
+encrypt_code_text='# 文本加密，需传入Salt值
+	salt_value="$@"
+	if [ '$salt_length' -eq 0 ]; then
+		'"$repo_crypt_command"' -a -A -pass file:"'"$encrypt_pass_file"'" -S "$salt_value"
+	else
+		'"$repo_crypt_command"' -pass file:"'"$encrypt_pass_file"'" -S "$salt_value" | {
+			dd bs=1 skip='$salt_length' count=0 2>/dev/null # 去除Salt值
+			cat
+		} | openssl base64 -A
+	fi
+'
+
+decrypt_code_text='# 文本解密，需传入Salt值
+	salt_value="$@"
+	if [ '$salt_length' -eq 0 ]; then
+		'"$repo_crypt_command"' -a -A -pass file:"'"$encrypt_pass_file"'" -d -S "$salt_value"
+	else
+		openssl base64 -A -d | {
+			echo -n "$salt_value" | sed '$'\x27''s/\([0-9A-F]\{2\}\)/\\\\\\x\1/gI'$'\x27'' | {
+				printf "Salted__"
+				xargs printf
+			} | {
+				dd bs=1 count='$salt_length' 2>/dev/null # 增添Salt值
+				cat > /dev/null # 消耗掉xargs命令的输出
+			}
+			cat
+		} | '"$repo_crypt_command"' -pass file:"'"$encrypt_pass_file"'" -d -S "$salt_value"
+	fi
+'
+
+function encrypt_code_bin ()
+{ # 二进制文件加密，无需传参
+	# cd $(dirname "$encrypt_pass_file") # 这里先切换工作目录，因为openssl v3.0+版本可能存在BUG："-pass file:"问题
+	$repo_crypt_command -pass file:"$encrypt_pass_file"
+}
+
+function decrypt_code_bin ()
+{ # 二进制文件解密，无需传参
+	$repo_crypt_command -pass file:"$encrypt_pass_file" -d
+}
+
+
+code_encrypt='# 用于加密Shell脚本中的标识，参数是待加密的明文
+	plaintext="$*"
+	echo -n "code_decrypt "
+	if [ "$plaintext" ]; then
+		if [ '$salt_length' -eq 0 ]; then
+			echo -n "$plaintext" | '"$repo_crypt_command"' -a -A -pass file:"'"$encrypt_pass_file"'" -S '$encrypt_salt_shell'
+		else
+			echo -n "$plaintext" | '"$repo_crypt_command"' -pass file:"'"$encrypt_pass_file"'" -S '$encrypt_salt_shell' | {
+				dd bs=1 skip='$salt_length' count=0 2>/dev/null # 去除Salt值
+				cat
+			} | openssl base64 -A
+		fi
+	fi
+'
+
+code_decrypt='# 用于解密Shell脚本中的标识，参数是待解密的密文
+	ciphertext="$*"
+	echo -n "code_encrypt "
+	if [ "$ciphertext" ]; then
+		echo -n "$ciphertext" | {
+			if [ '$salt_length' -eq 0 ]; then
+				'"$repo_crypt_command"' -a -A -pass file:"'"$encrypt_pass_file"'" -d -S '$encrypt_salt_shell'
+			else
+				openssl base64 -A -d | {
+					echo -n '$encrypt_salt_shell' | sed '$'\x27''s/\([0-9A-F]\{2\}\)/\\\\\\x\1/gI'$'\x27'' | {
+						printf "Salted__"
+						xargs printf
+					} | {
+						dd bs=1 count='$salt_length' 2>/dev/null # 增添Salt值
+						cat > /dev/null # 消耗掉xargs命令的输出
+					}
+					cat
+				} | '"$repo_crypt_command"' -pass file:"'"$encrypt_pass_file"'" -d -S '$encrypt_salt_shell'
+			fi
+		} | od -tu1 -An -v | LC_ALL=C awk '$'\x27''{str=str " " $0} END{ # 注意明文中可能有特殊字符，必须以二进制方式处理为转义字符，经过od命令转十进制处理
+			printf("\x27");
+			len=split(str,arr," ");
+			str="";
+			for(i=1;i<=len;){
+				if(arr[i]<128){ # 单个ASCII字符
+					if(arr[i]!=39&&arr[i]<=126&&arr[i]>=32){ # 可打印字符，不包括单引号和换行符
+						stringboxhex(str);
+						str="";
+						printf("%c",arr[i]+0);
+					}
+					else str = str " " arr[i]; # 其他ASCII字符要转义处理
+					i++;
+					continue;
+				}
+				if(i==len){
+					str = str " " arr[i];
+					i++;
+					continue;
+				}
+				if(arr[i]>=192&&arr[i]<224&&arr[i+1]>=128&&arr[i+1]<192){
+					# 双字节UTF8编码
+					stringboxhex(str);
+					str="";
+					printf("%c%c",arr[i]+0,arr[i+1]+0);
+					i+=2;
+					continue;
+				}
+				if(i+1==len){
+					str = str " " arr[i];
+					i++;
+					continue;
+				}
+				if(arr[i]>=224&&arr[i]<240&&arr[i+1]>=128&&arr[i+1]<192&&arr[i+2]>=128&&arr[i+2]<192){
+					# 三字节UTF8编码
+					stringboxhex(str);
+					str="";
+					printf("%c%c%c",arr[i]+0,arr[i+1]+0,arr[i+2]+0);
+					i+=3;
+					continue;
+				}
+				if(i+2==len){
+					str = str " " arr[i];
+					i++;
+					continue;
+				}
+				if(arr[i]>=240&&arr[i]<248&&arr[i+1]>=128&&arr[i+1]<192&&arr[i+2]>=128&&arr[i+2]<192&&arr[i+3]>=128&&arr[i+3]<192){
+					# 四字节UTF8编码
+					stringboxhex(str);
+					str="";
+					printf("%c%c%c%c",arr[i]+0,arr[i+1]+0,arr[i+2]+0,arr[i+3]+0);
+					i+=4;
+					continue;
+				}
+				if(i+3==len){
+					str = str " " arr[i];
+					i++;
+					continue;
+				}
+				if(arr[i]>=248&&arr[i]<252&&arr[i+1]>=128&&arr[i+1]<192&&arr[i+2]>=128&&arr[i+2]<192&&arr[i+3]>=128&&arr[i+3]<192&&arr[i+4]>=128&&arr[i+4]<192){
+					# 五字节UTF8编码
+					stringboxhex(str);
+					str="";
+					printf("%c%c%c%c%c",arr[i]+0,arr[i+1]+0,arr[i+2]+0,arr[i+3]+0,arr[i+4]+0);
+					i+=5;
+					continue;
+				}
+				if(i+4==len){
+					str = str " " arr[i];
+					i++;
+					continue;
+				}
+				if(arr[i]>=252&&arr[i]<254&&arr[i+1]>=128&&arr[i+1]<192&&arr[i+2]>=128&&arr[i+2]<192&&arr[i+3]>=128&&arr[i+3]<192&&arr[i+4]>=128&&arr[i+4]<192&&arr[i+5]>=128&&arr[i+5]<192){
+					# 六字节UTF8编码
+					stringboxhex(str);
+					str="";
+					printf("%c%c%c%c%c%c",arr[i]+0,arr[i+1]+0,arr[i+2]+0,arr[i+3]+0,arr[i+4]+0,arr[i+5]+0);
+					i+=6;
+					continue;
+				}
+				str = str " " arr[i];
+				i++;
+			}
+			stringboxhex(str);
+			printf("\x27");
+		} function stringboxhex(str,    arr,len,i){ # 字符转义输出
+			len=split(str,arr," ");
+			if(len!=0)printf("\x27$\x27");
+			for(i=1;i<=len;i++)
+				printf("\\x" sprintf("%x",arr[i]+0));
+			if(len!=0)printf("\x27\x27");
+		}'$'\x27'' # 明文需以字符串存储，不支持"\0"字符，请注意
+	fi
+'
+
+# 导出必要替代变量用于加密解密操作
+export code_encrypt code_decrypt encrypt_code_text decrypt_code_text
+
+function encrypt_operator ()
+{ # 加密操作
+	local fname
+	# 获取密码
+	if ! [ -f "$encrypt_pass_file" ]; then
+		echo "please input the repository password (ctrl+d to EOF):" >&2
+		cat > "$encrypt_pass_file"
+	fi
+	if [ $(stat -c "%s" "$encrypt_pass_file") -eq 0 ]; then
+		echo "error, the password length is 0."
+		return 1
+	fi
+	if [ -e "$crypt_backup_file" ]; then
+		rm -vf "$crypt_backup_file" || return 1
+	fi
+	# 文本加密
+	for fname in "${code_encrypt_file[@]}"
+	do
+		if [ "${fname##*.}" = "enc" ]; then # 整体加密
+			if [ "$crypt_backup_file" ]; then
+				tar -rvf "$crypt_backup_file" "${fname%.enc}"
+			fi
+			find "${fname%.enc}" -type f | while read line
+			do
+				salt_value=$(openssl rand -hex 8)
+				# 要支持三种换行符
+				text_linefeed=$(sed -b 's/[^\r]*//;q' "$line" | wc -c)
+				if [ $text_linefeed -le 1 ]; then
+					text_linefeed=$'\n'
+				elif [ $text_linefeed -eq 2 ]; then
+					text_linefeed=$'\r\n'
+				else
+					text_linefeed=$'\r'
+				fi
+				# 这里只能用od配合awk处理，因为要考虑广泛的文本编码支持
+				cat "$line" | od -tu1 -An -v | LC_ALL=C awk -v salt=$salt_value -v linefeed="$text_linefeed" 'BEGIN{
+					printf("%s",salt linefeed); # 第一行输出Salt值
+					str="";
+					cmd="bash -c \"$encrypt_code_text\" @ " salt;
+				} {
+					for(i=1;i<=NF;i++){
+						if($i==13||$i==10){ # 换行符 CR LF
+							# 为保证兼容性，用命令管道控制输出
+							if(length(str)){ # 避免空跑浪费
+								printf("%s",str) | cmd; # 按行执行encrypt_code_text
+								close(cmd);
+								str="";
+							}
+							printf("%c",$i+0);
+						}
+						else str=str sprintf("%c",$i+0);
+					}
+				} END{
+					if(length(str)){
+						printf("%s",str) | cmd;
+						close(cmd);
+					}
+				}' | sponge "$line"
+			done
+			mv "${fname%.enc}" "$fname" # 整体加密後，文件名增加".enc"後缀
+		else # 部分加密
+			if [ "$crypt_backup_file" ]; then
+				tar -rvf "$crypt_backup_file" "$fname"
+			fi
+			find "$fname" -type f | while read line
+			do
+				text_linefeed=$(sed -b 's/[^\r]*//;q' "$line" | wc -c)
+				if [ $text_linefeed -le 1 ]; then
+					text_linefeed=$'\n'
+				elif [ $text_linefeed -eq 2 ]; then
+					text_linefeed=$'\r\n'
+				else
+					text_linefeed=$'\r'
+				fi # 部分加密只支持兼容ASCII的文本编码，会格式化换行符，LC_ALL=C是必须的，保证awk按ASCII编码处理，避免报错
+				cat "$line" | LC_ALL=C awk -v linefeed="$text_linefeed" 'BEGIN{RS="\r\n|\n|\r";crypt_flag=0;} {
+					if(crypt_flag==0){ # 未获取Salt值
+						if(NR>3)printf("%s",$0 linefeed);
+						else{
+							if(match($0,"^(.*[^0-9A-Za-z])?[0-9A-Fa-f]{16}$")){
+								oldsalt=substr($0,RLENGTH-15);
+								salt="openssl rand -hex 8";
+								salt | getline newsalt;
+								close(salt);
+								cmd="bash -c \"$encrypt_code_text\" @ " newsalt;
+								printf("%s",substr($0,1,RLENGTH-16) newsalt linefeed);
+								crypt_flag=1;
+							}
+							else printf("%s",$0 linefeed);
+						}
+					}
+					else if(crypt_flag==1){ # 已获取Salt值
+						if(match($0,"^(.*[^0-9A-Za-z])?" oldsalt "$")){
+							printf("%s",substr($0,1,RLENGTH-16) newsalt linefeed);
+							crypt_flag=2;
+						}
+						else printf("%s",$0 linefeed);
+					}
+					else if(crypt_flag==2){ # 处于加密部分
+						if(match($0,"^(.*[^0-9A-Za-z])?" oldsalt "$")){
+							printf("%s",substr($0,1,RLENGTH-16) newsalt linefeed);
+							crypt_flag=1;
+						}
+						else{ # 需要加密处理
+							if(length($0)){
+								printf("%s",$0) | cmd;
+								close(cmd);
+							}
+							printf("%s",linefeed);
+						}
+					}
+				}' | sponge "$line"
+			done
+		fi
+	done
+	# 二进制文件加密
+	for fname in "${bin_encrypt_file[@]}"
+	do
+		if [ "$crypt_backup_file" ]; then
+			tar -rvf "$crypt_backup_file" "$fname"
+		fi
+		find "$fname" -type f | while read line
+		do
+			cat "$line" | encrypt_code_bin | sponge "$line"
+		done
+	done
+	# Shell脚本加密
+	for fname in "${sh_encrypt_file[@]}"
+	do
+		if [ "$crypt_backup_file" ]; then
+			tar -rvf "$crypt_backup_file" "$fname"
+		fi
+		find "$fname" -type f | while read line
+		do
+			cat "$line" | awk '/.*`code_encrypt [^`]*`.*/{ # 匹配反引号命令替换格式
+				str=$0;
+				while(where=match(str,"`code_encrypt [^`]*`")){ # 循环处理匹配内容
+					lstr=substr(str,1,where);
+					rstr=substr(str,where+RLENGTH-1);
+					cmd="bash -c \"$" substr(str,where+1,12) "\" @ " substr(str,where+14,RLENGTH-15);
+					cmd | getline str; # 执行code_encrypt函数
+					close(cmd); # 必须关闭命令，以免重复命令异常
+					str=lstr str rstr;
+				}
+				print str;
+			} !/.*`code_encrypt [^`]*`.*/{print}' | sponge "$line"
+		done
+	done
+	if [ -f "$crypt_backup_file" ]; then
+		gzip -c "$crypt_backup_file" | sponge "$crypt_backup_file"
+	fi
+	# 删除密码文件
+	rm -vf "$encrypt_pass_file"
+}
+
+function decrypt_operator ()
+{ # 解密操作
+	local fname
+	# 获取密码
+	if ! [ -f "$encrypt_pass_file" ]; then
+		echo "please input the repository password (ctrl+d to EOF):" >&2
+		cat > "$encrypt_pass_file"
+	fi
+	if [ $(stat -c "%s" "$encrypt_pass_file") -eq 0 ]; then
+		echo "error, the password length is 0."
+		return 1
+	fi
+	if [ -e "$crypt_backup_file" ]; then
+		rm -vf "$crypt_backup_file" || return 1
+	fi
+	# 文本解密
+	for fname in "${code_encrypt_file[@]}"
+	do
+		if [ "$crypt_backup_file" ]; then
+			tar -rvf "$crypt_backup_file" "$fname"
+		fi
+		if [ "${fname##*.}" = "enc" ]; then # 整体解密
+			find "$fname" -type f | while read line
+			do
+				cat "$line" | od -tu1 -An -v | LC_ALL=C awk 'BEGIN{
+					salt_flag=0;
+					str="";
+					salt="";
+				} {
+					i=1;
+					if(salt_flag==0){
+						for(;i<=NF;i++){
+							if($i==13||$i==10){
+								salt_flag=1;
+								lineend=$i;
+								i++;
+								break;
+							}
+							else salt=salt sprintf("%c",$i+0); # 获取Salt值
+						}
+					}
+					if(salt_flag==1){
+						if(i<=NF){
+							if(lineend==13&&$i==10)i++;
+							salt_flag=2;
+							cmd="bash -c \"$decrypt_code_text\" @ " salt;
+						}
+					}
+					if(salt_flag==2){
+						for(;i<=NF;i++){
+							if($i==13||$i==10){ # 换行符 CR LF
+								if(length(str)){
+									printf("%s",str) | cmd; # 按行执行decrypt_code_text
+									close(cmd);
+									str="";
+								}
+								printf("%c",$i+0);
+							}
+							else str=str sprintf("%c",$i+0);
+						}
+					}
+				} END{
+					if(length(str)){
+						printf("%s",str) | cmd;
+						close(cmd);
+					}
+				}' | sponge "$line"
+			done
+			mv "$fname" "${fname%.enc}"
+		else # 部分解密
+			find "$fname" -type f | while read line
+			do
+				text_linefeed=$(sed -b 's/[^\r]*//;q' "$line" | wc -c)
+				if [ $text_linefeed -le 1 ]; then
+					text_linefeed=$'\n'
+				elif [ $text_linefeed -eq 2 ]; then
+					text_linefeed=$'\r\n'
+				else
+					text_linefeed=$'\r'
+				fi # 部分加密只支持兼容ASCII的文本编码，会格式化换行符，LC_ALL=C是必须的，保证awk按ASCII编码处理，避免报错
+				cat "$line" | LC_ALL=C awk -v linefeed="$text_linefeed" 'BEGIN{RS="\r\n|\n|\r";crypt_flag=0;} {
+					if(crypt_flag==0){ # 未获取Salt值
+						if(NR>3)printf("%s",$0 linefeed);
+						else{
+							if(match($0,"^(.*[^0-9A-Za-z])?[0-9A-Fa-f]{16}$")){
+								salt=substr($0,RLENGTH-15);
+								cmd="bash -c \"$decrypt_code_text\" @ " salt;
+								crypt_flag=1;
+							}
+							printf("%s",$0 linefeed);
+						}
+					}
+					else if(crypt_flag==1){ # 已获取Salt值
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$"))crypt_flag=2;
+						printf("%s",$0 linefeed);
+					}
+					else if(crypt_flag==2){ # 处于加密部分
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$")){
+							crypt_flag=1;
+							printf("%s",$0 linefeed);
+						}
+						else{ # 需要解密处理
+							if(length($0)){
+								printf("%s",$0) | cmd;
+								close(cmd);
+							}
+							printf("%s",linefeed);
+						}
+					}
+				}' | sponge "$line"
+			done
+		fi
+	done
+	# 二进制文件解密
+	for fname in "${bin_encrypt_file[@]}"
+	do
+		if [ "$crypt_backup_file" ]; then
+			tar -rvf "$crypt_backup_file" "$fname"
+		fi
+		find "$fname" -type f | while read line
+		do
+			cat "$line" | decrypt_code_bin | sponge "$line"
+		done
+	done
+	# Shell脚本解密
+	for fname in "${sh_encrypt_file[@]}"
+	do
+		if [ "$crypt_backup_file" ]; then
+			tar -rvf "$crypt_backup_file" "$fname"
+		fi
+		find "$fname" -type f | while read line
+		do
+			cat "$line" | awk '/.*`code_decrypt [^`]*`.*/{
+				str=$0;
+				while(where=match(str,"`code_decrypt [^`]*`")){
+					lstr=substr(str,1,where);
+					rstr=substr(str,where+RLENGTH-1);
+					cmd="bash -c \"$" substr(str,where+1,12) "\" @ " substr(str,where+14,RLENGTH-15);
+					cmd | getline str; # 执行code_decrypt函数
+					close(cmd); # 必须关闭命令，以免重复命令异常
+					str=lstr str rstr;
+				}
+				print str;
+			} !/.*`code_decrypt [^`]*`.*/{print}' | sponge "$line"
+		done
+	done
+	if [ -f "$crypt_backup_file" ]; then
+		gzip -c "$crypt_backup_file" | sponge "$crypt_backup_file"
+	fi
+}
+
+function full_decrypt_operator ()
+{ # 完全解密，用备份文件处理更简便
+	if ! [ -f "$encrypt_pass_file" ]; then # 不存在密码文件，需解密
+		decrypt_operator
+	fi
+	if ! [ "$crypt_backup_file" ]; then # 没有指定备份文件路径，返回错误
+		echo "You did not specify a backup file, not support full_decrypt_operator!"
+		return 1
+	fi
+	local fname answer
+	if [ -e "$crypt_backup_file" ]; then
+		echo "If full_decrypt_operator is called again, it will cause the backup to become invalid."
+		printf "Do you want to continue? Y or N (y or n): "
+		read answer # 提示请避免重复调用完全解密操作
+		[ "$answer" = "Y" -o "$answer" = "y" ] || return 1
+		rm -vf "$crypt_backup_file" || return 1
+	fi
+	# 文本完全解密
+	for fname in "${code_encrypt_file[@]}"
+	do
+		if [ "${fname##*.}" = "enc" ]; then # 整体解密
+			tar -rvf "$crypt_backup_file" "${fname%.enc}"
+		else # 部分解密
+			tar -rvf "$crypt_backup_file" "$fname"
+			find "$fname" -type f | while read line
+			do
+				text_linefeed=$(sed -b 's/[^\r]*//;q' "$line" | wc -c)
+				if [ $text_linefeed -le 1 ]; then
+					text_linefeed=$'\n'
+				elif [ $text_linefeed -eq 2 ]; then
+					text_linefeed=$'\r\n'
+				else
+					text_linefeed=$'\r'
+				fi # 部分加密只支持兼容ASCII的文本编码，会格式化换行符，LC_ALL=C是必须的，保证awk按ASCII编码处理，避免报错
+				cat "$line" | LC_ALL=C awk -v linefeed="$text_linefeed" 'BEGIN{RS="\r\n|\n|\r";crypt_flag=0;salt="";} {
+					if(crypt_flag==0){ # 未获取Salt值
+						if(NR>3)printf("%s",$0 linefeed);
+						else{
+							if(match($0,"^(.*[^0-9A-Za-z])?[0-9A-Fa-f]{16}$")){ # Salt标识行不输出
+								salt=substr($0,RLENGTH-15);
+								crypt_flag=1;
+							}
+							else printf("%s",$0 linefeed);
+						}
+					}
+					else if(crypt_flag==1){ # 已获取Salt值
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$"))crypt_flag=3; # Salt标识行不输出
+						else{ # Salt标识的下一行不打印换行符
+							printf("%s",$0);
+							crypt_flag=2;
+						}
+					}
+					else if(crypt_flag==2){ # 已获取Salt值
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$"))crypt_flag=3; # Salt标识行不输出
+						else printf("%s",linefeed $0);
+					}
+					else if(crypt_flag==3){ # 处于加密部分
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$"))crypt_flag=1; # Salt标识行不输出
+						else{ # Salt标识的下一行不打印换行符
+							printf("%s",$0);
+							crypt_flag=4;
+						}
+					}
+					else if(crypt_flag==4){ # 处于加密部分
+						if(match($0,"^(.*[^0-9A-Za-z])?" salt "$"))crypt_flag=1; # Salt标识行不输出
+						else printf("%s",linefeed $0);
+					}
+				} END{if(length(salt))printf("%s",linefeed)}#结尾补充必要的换行符' | sponge "$line"
+			done
+		fi
+	done
+	# 二进制文件解密，不须完全解密
+	for fname in "${bin_encrypt_file[@]}"; do tar -rvf "$crypt_backup_file" "$fname"; done
+	# Shell脚本完全解密
+	for fname in "${sh_encrypt_file[@]}"
+	do
+		tar -rvf "$crypt_backup_file" "$fname"
+		find "$fname" -type f | while read line
+		do
+			cat "$line" | awk '/.*`code_encrypt [^`]*`.*/{
+				str=$0;
+				while(where=match(str,"`code_encrypt [^`]*`")){
+					lstr=substr(str,1,where-1);
+					rstr=substr(str,where+RLENGTH);
+					str=lstr substr(str,where+14,RLENGTH-15) rstr; # 去除code_encrypt的命令替换
+				}
+				print str;
+			} !/.*`code_encrypt [^`]*`.*/{print}' | sponge "$line"
+		done
+	done
+	if [ -f "$crypt_backup_file" ]; then
+		gzip -c "$crypt_backup_file" | sponge "$crypt_backup_file"
+	fi
+	echo "After full_decrypt_operator, if you need to encrypt again, please recovery_backup_operator first!"
+}
+
+function recovery_backup_operator ()
+{ # 恢复备份
+	local fname
+	if [ -f "$crypt_backup_file" ]; then
+		for fname in "${code_encrypt_file[@]}"
+		do
+			if [ "${fname##*.}" = "enc" ]; then
+				rm -rvf "${fname%.enc}"
+			fi
+			rm -rvf "$fname"
+		done
+		for fname in "${bin_encrypt_file[@]}"
+		do
+			rm -rvf "$fname"
+		done
+		for fname in "${sh_encrypt_file[@]}"
+		do
+			rm -rvf "$fname"
+		done
+		if { gzip -t "$crypt_backup_file" > /dev/null 2>&1; }; then
+			tar -xzvf "$crypt_backup_file"
+		else
+			tar -xvf "$crypt_backup_file"
+		fi
+	else
+		echo "You did not specify a backup file!"
+		return 1
+	fi
+}
+
+if [ "$*" = e ]; then # 加密操作
+	encrypt_operator
+elif [ "$*" = d ]; then # 解密操作
+	decrypt_operator
+elif [ "$*" = D ]; then # 完全解密
+	full_decrypt_operator
+elif [ "$*" = R ]; then # 恢复备份
+	recovery_backup_operator
+fi
+
+unset salt_length code_encrypt code_decrypt encrypt_code_text decrypt_code_text
+
+function code_encrypt ()
+{
+	echo -n "$*"
+}
+
+function code_decrypt ()
+{
+	local ciphertext="$*"
+	if [ "$ciphertext" ]; then
+		if ! [ -f "$encrypt_pass_file" ]; then
+			echo "please input the repository password (ctrl+d to EOF):" >&2
+			cat > "$encrypt_pass_file"
+		fi
+		if [ $(stat -c "%s" "$encrypt_pass_file") -eq 0 ]; then
+			echo "please input the content (ctrl+d to EOF):" >&2
+			cat && return
+		fi
+		echo -n "$ciphertext" | {
+			salt_length=$(cat /dev/null | openssl chacha20 -pbkdf2 -pass pass:0 -S "$encrypt_salt_shell" | wc -c)
+			openssl base64 -A -d | {
+				echo -n "$encrypt_salt_shell" | sed 's/\([0-9A-F]\{2\}\)/\\\\\\x\1/gI' | {
+					printf "Salted__"
+					xargs printf
+				} | {
+					dd bs=1 count=$salt_length 2>/dev/null
+					cat > /dev/null # 消耗掉xargs命令的输出
+				}
+				cat
+			} | $repo_crypt_command -pass file:"$encrypt_pass_file" -d -S "$encrypt_salt_shell"
+		}
+	fi
+}
+
+export repo_crypt_command encrypt_pass_file encrypt_salt_shell
+export -f code_encrypt code_decrypt
+# 清理函数和变量
+unset code_encrypt_file bin_encrypt_file sh_encrypt_file
+unset -f encrypt_operator decrypt_operator full_decrypt_operator recovery_backup_operator encrypt_code_bin decrypt_code_bin
+# 保证脚本环境干净
