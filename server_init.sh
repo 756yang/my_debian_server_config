@@ -18,8 +18,20 @@
     在server上执行命令command，以filename的内容为标准输入
 EOF
 
-read -p "please input you server address:ip ? " myserver
-read -p "please input you server username? " username
+[ -x "$0" -a "$0" != "bash" ] && {
+	scp_dir="$(dirname "$(readlink -f "$0")")"
+	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
+	IFS='' read -r -d '' awk_conf < "$scp_dir/shell_common/awk_conf.sh"
+} || {
+	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
+	awk_conf="$(wget -qO- https://github.com/756yang/shell_common/raw/main/awk_conf.sh)"
+}
+
+bash -c "$checkcmd_install" @ ssh openssl grep "gawk|awk" sed xargs find sponge tar gzip
+[ $? -ne 0 ] && exit 1
+
+read -p "please input you server address:port ? " myserver
+read -p "please input you server username (not root)? " username
 mysshport=${myserver##*:}
 myserver=${myserver%:*}
 
@@ -36,7 +48,7 @@ IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 更新软件包和系统
 apt update && apt upgrade
 # 安装必要软件包
-apt install sudo vim ufw socat nginx
+apt install sudo vim ufw socat nginx wget
 # 配置acme.sh自动申请免费ssl证书
 mkdir /etc/nginx/cert
 wget -O -  https://get.acme.sh | sh -s email=$my_email
@@ -48,8 +60,13 @@ dns_api_key=\${dns_api_key^}
 export \${dns_api_key%:*}_Key=\${dns_api_key##*:}
 dns_api_key=\${dns_api_key,}
 read -p "please input a dnssleep time (default is 300): " dnssleep
-acme.sh --issue --dns dns_\${dns_api_key%:*} --dnssleep \${dnssleep:-300} -d $server_domain -d '*.$server_domain' --keylength ec-256 --force
-acme.sh --install-cert --ecc -d $server_domain --cert-file "/etc/nginx/cert/$server_domain.crt" --key-file "/etc/nginx/cert/$server_domain.key" --fullchain-file "/etc/nginx/cert/$server_domain.fullchain.crt" --reloadcmd "systemctl reload nginx"
+acme.sh --issue --dns dns_\${dns_api_key%:*} --dnssleep \${dnssleep:-300}\\
+		-d $server_domain -d '*.$server_domain' --keylength ec-256 --force
+acme.sh --install-cert --ecc -d $server_domain\\
+		--cert-file "/etc/nginx/cert/$server_domain.crt"\\
+		--key-file "/etc/nginx/cert/$server_domain.key"\\
+		--fullchain-file "/etc/nginx/cert/$server_domain.fullchain.crt"\\
+		--reloadcmd "systemctl reload nginx"
 # 添加普通用户及其家目录
 useradd -G sudo -s /bin/bash -d "/home/$username" -m "$username"
 passwd "$username"
@@ -61,52 +78,20 @@ ssh root@$myserver -p $mysshport -t "$SSH_COMMAND"
 ssh-copy-id $username@$myserver -p $mysshport
 
 
-IFS='' read -r -d '' SSH_COMMAND <<"EOT"
 # 自动检查命令，必要时安装对应软件
-function checkcmd_install ()
-{
-	local pkgname
-	if ! { which $1 >/dev/null 2>&1; }; then
-		if ! { ls /usr/sbin/$1 >/dev/null 2>&1; }; then
-			if [ "$2" ]; then
-				bash -c "$2" @ ${@:3}
-			else
-				checkcmd_install apt-file "sudo apt install apt-file && sudo apt-file update"
-				pkgname=$(apt-file -x search "^/(usr/local/sbin|usr/local/bin|usr/sbin|usr/bin|sbin|bin)/$1\$")
-				sudo apt install ${pkgname%%:*}
-			fi
-		fi
-	fi
-}
+IFS='' read -r -d '' SSH_COMMAND <<EOT
+function checkcmd_install {$checkcmd_install}
+checkcmd_install "gawk|awk" sponge
+EOT
+$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+[ $? -ne 0 ] && exit 1
 
-checkcmd_install awk "sudo apt install gawk"
-checkcmd_install sponge
-checkcmd_install cat
-
+IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 修改sshd配置，禁用密码登录并开启密钥登录
-cat /etc/ssh/sshd_config | awk '{
-	if(match($0,"^[^#]*PermitRootLogin ")){
-		PermitRootLogin="PermitRootLogin yes";
-		print PermitRootLogin;
-	}
-	else if(match($0,"^[^#]*PasswordAuthentication ")){
-		PasswordAuthentication="PasswordAuthentication no";
-		print PasswordAuthentication;
-	}
-	else if(match($0,"^[^#]*RSAAuthentication ")){
-		RSAAuthentication="RSAAuthentication yes";
-		print RSAAuthentication;
-	}
-	else if(match($0,"^[^#]*PubkeyAuthentication ")){
-		PubkeyAuthentication="PubkeyAuthentication yes";
-		print PubkeyAuthentication;
-	}
-} END{
-	if(!length(PermitRootLogin))print "PermitRootLogin yes";
-	if(!length(PasswordAuthentication))print "PasswordAuthentication no";
-	if(!length(RSAAuthentication))print "RSAAuthentication yes";
-	if(!length(PubkeyAuthentication))print "PubkeyAuthentication yes";
-}' | sponge /etc/ssh/sshd_config
+function awk_conf {$awk_conf}
+cat /etc/ssh/sshd_config | awk_conf "PermitRootLogin yes"\\
+	"PasswordAuthentication no" "RSAAuthentication yes"\\
+	"PubkeyAuthentication yes" | sudo sponge /etc/ssh/sshd_config
 EOT
 
 ssh $username@$myserver -p $mysshport -t "$SSH_COMMAND"

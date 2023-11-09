@@ -1,35 +1,30 @@
 #!/bin/bash
 
+[ -x "$0" -a "$0" != "bash" ] && {
+	IFS='' read -r -d '' checkcmd_install < "$(dirname "$(readlink -f "$0")")/shell_common/checkcmd_install.sh"
+} || {
+	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
+}
 
-read -p "please input you server address:ip ? " myserver
-read -p "please input you server username? " username
+bash -c "$checkcmd_install" @ ssh sshpass openssl grep "gawk|awk" sed xargs find sponge tar gzip
+[ $? -ne 0 ] && exit 1
+
+read -p "please input you server address:port ? " myserver
+read -p "please input you server username:password ? " username
 mysshport=${myserver##*:}
 myserver=${myserver%:*}
+[[ "$username" =~ ":" ]] && mypassword="${username#*:}" && username="${username%%:*}"
+[ -n "mypassword" ] && sshcmd='sshpass -p "'$mypassword'" ssh' || sshcmd=ssh
+
+IFS='' read -r -d '' SSH_COMMAND <<EOT
+function checkcmd_install {$checkcmd_install}
+checkcmd_install wget grep git
+EOT
+$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+[ $? -ne 0 ] && exit 1
 
 
 IFS='' read -r -d '' SSH_COMMAND <<"EOT"
-# 自动检查命令，必要时安装对应软件
-function checkcmd_install ()
-{
-	local pkgname
-	if ! { which $1 >/dev/null 2>&1; }; then
-		if ! { ls /usr/sbin/$1 >/dev/null 2>&1; }; then
-			if [ "$2" ]; then
-				bash -c "$2" @ ${@:3}
-			else
-				checkcmd_install apt-file "sudo apt install apt-file && sudo apt-file update"
-				pkgname=$(apt-file -x search "^/(usr/local/sbin|usr/local/bin|usr/sbin|usr/bin|sbin|bin)/$1\$")
-				sudo apt install ${pkgname%%:*}
-			fi
-		fi
-	fi
-}
-
-checkcmd_install wget
-checkcmd_install lsmod
-checkcmd_install grep
-checkcmd_install tee
-
 # 安装xray-core
 sudo bash -c "$(wget -O - https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
@@ -45,7 +40,7 @@ if ! { lsmod | grep tcp_bbr >/dev/null; }; then
 fi
 EOT
 
-ssh $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 
 
 echo "please input your server_domain:"
@@ -223,9 +218,17 @@ echo "This simple html test!" > ~/www/hexoblog/index.html
 # 重启xray和nginx服务
 sudo systemctl restart xray
 sudo systemctl restart nginx
+
+# 配置网页的git服务器
+mkdir -p ~/git/repo
+git init --bare ~/git/repo/hexoblog.git
+echo '#!/bin/bash
+git --work-tree=\$HOME/www/hexoblog --git-dir=\$HOME/git/repo/hexoblog.git checkout -f' > ~/git/repo/hexoblog.git/hooks/post-receive
+chmod +x ~/git/repo/hexoblog.git/hooks/post-receive
+
 EOT
 
-ssh $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 
 
 # 生成vless分享链接

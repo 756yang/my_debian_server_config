@@ -30,6 +30,7 @@ bin_encrypt_file=(
 sh_encrypt_file=(
 server_init.sh
 config_xray_blog.sh
+config_email.sh
 )
 
 # 加密解密操作备份文件路径
