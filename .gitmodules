@@ -1,0 +1,3 @@
+[submodule "shell_common"]
+	path = shell_common
+	url = https://github.com/756yang/shell_common.git
