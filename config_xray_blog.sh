@@ -1,9 +1,21 @@
 #!/bin/bash
 
 [ -x "$0" -a "$0" != "bash" ] && {
-	IFS='' read -r -d '' checkcmd_install < "$(dirname "$(readlink -f "$0")")/shell_common/checkcmd_install.sh"
-} || {
+	scp_dir="$(dirname "$(readlink -f "$0")")"
+	[ "$(ls "$scp_dir/shell_common")" ] && [ "$(ls "$scp_dir/script")" ]
+} && {
+	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
+	IFS='' read -r -d '' nginx_http_redirect < "$scp_dir/script/nginx/http_redirect.conf"
+	IFS='' read -r -d '' nginx_https_from_xray < "$scp_dir/script/nginx/https_from_xray.conf"
+	IFS='' read -r -d '' nginx_stream_sni_proxy < "$scp_dir/script/nginx/stream_sni_proxy.conf"
+	IFS='' read -r -d '' xray_config < "$scp_dir/script/xray/config.json"
+}
+[ $? -ne 0 ] && {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
+	nginx_http_redirect="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/nginx/http_redirect.conf)"
+	nginx_https_from_xray="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/nginx/https_from_xray.conf)"
+	nginx_stream_sni_proxy="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/nginx/stream_sni_proxy.conf)"
+	xray_config="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/xray/config.json)"
 }
 
 bash -c "$checkcmd_install" @ ssh sshpass openssl grep "gawk|awk" sed xargs find sponge tar gzip
@@ -18,7 +30,7 @@ myserver=${myserver%:*}
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
 function checkcmd_install {$checkcmd_install}
-checkcmd_install wget grep git
+checkcmd_install wget grep git sponge find
 EOT
 $sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 [ $? -ne 0 ] && exit 1
@@ -31,9 +43,9 @@ sudo bash -c "$(wget -O - https://github.com/XTLS/Xray-install/raw/main/install-
 # 配置tcp_bbr加速网络
 if ! { lsmod | grep tcp_bbr >/dev/null; }; then
 	if ! { grep '^[^#]*net\.ipv4\.tcp_congestion_control' /etc/sysctl.conf >/dev/null; }; then
-		awk '{print}END{print "net.ipv4.tcp_congestion_control=bbr"}' /etc/sysctl.conf | sponge /etc/sysctl.conf
+		awk '{print}END{print "net.ipv4.tcp_congestion_control=bbr"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
 		if ! { grep '^[^#]*net\.core\.default_qdisc' /etc/sysctl.conf >/dev/null; }; then
-			awk '{print}END{print "net.core.default_qdisc=fq"}' /etc/sysctl.conf | sponge /etc/sysctl.conf
+			awk '{print}END{print "net.core.default_qdisc=fq"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
 		fi
 		sudo sysctl -p
 	fi
@@ -47,171 +59,45 @@ echo "please input your server_domain:"
 server_domain=`code_decrypt C8CzPgrRq++AcGs=`
 
 echo "please input your websocket_path:"
-websocket_path=`code_decrypt V8WAaCvam5ec`
+websocket_path=`code_decrypt V5mNBjXC8ame`
 
 echo "please input your vless_reality_id:"
-vless_reality_id=`code_decrypt SZjlaUmF/afZKS+z5feEgba+PcB/cvzKA6T4q9p+3dkAPiiy` # REALITY配置的用户id，需生成
+vless_reality_id=`code_decrypt SprlZE7S8fPZKSLl4/eEgOroPZkqcqHKBfP3+ost3IJdbXi8` # REALITY配置的用户id，需生成
 echo "please input your vless_reality_prk:"
-vless_reality_prk=`code_decrypt LeizGi6dhY2NXG6lt7zli8aJR54nY7GmY6X6opQopMhfIS7yEO9vx/ygRg==` # REALITY配置的私钥，需生成
+vless_reality_prk=`code_decrypt QOjrFgnGqPPHb1GLtImAxbezJpZ/cLOxZMeEqtQAv4p1Q1X2FqRhku7EZA==` # REALITY配置的私钥，需生成
 echo "please input your vless_reality_pbk:"
-vless_reality_pbk=`code_decrypt Itq1JDTDhouXLFO957vI8r+sdI4hX5W2H/SghfgruNFpRyn9M5RazvX6fA==` # REALITY配置的公钥，需生成
+vless_reality_pbk=`code_decrypt GvCkB0bTvPmQfk7gv+qH/fjkRbQlX6iCfqWmrI5/i9ZIVFG3H4lSm9HWYA==` # REALITY配置的公钥，需生成
 echo "please input your vless_reality_sid1:"
-vless_reality_sid1=`code_decrypt HJm2Yx2G8PSWfH/kt+2Jgw==` # REALITY配置的爬虫客户端shortId(长)，需生成
+vless_reality_sid1=`code_decrypt QMjkZh2H8/bFLyzkteLV1g==` # REALITY配置的爬虫客户端shortId(长)，需生成
 echo "please input your vless_reality_sid2:"
-vless_reality_sid2=`code_decrypt QJHjaEnW9/g=` # REALITY配置的爬虫客户端shortId(短)，需生成
+vless_reality_sid2=`code_decrypt HJ2zaUuG8KI=` # REALITY配置的爬虫客户端shortId(短)，需生成
+echo "please input your vless_h2c_id:"
+vless_h2c_id=`code_decrypt ScjlMUeCoqPZJiPrsfeE1rvpPcF9Lv3KCqCtqo932NldPSm1` # H2C配置的用户id，需生成
 echo "please input your vless_websocket_id:"
-vless_websocket_id=`code_decrypt TJizMU6E9qDZLi3ksPeE0OjpPcB+JfbKC6P2+YAui4gJai2z` # WebSocket配置的用户id，需生成
+vless_websocket_id=`code_decrypt QcrgZUfR9KDZeSi2tveEgrjrPZpwJ6DKUa76/oAq3d5dPy/g` # WebSocket配置的用户id，需生成
 
+# 删除nginx的http 80端口的default_server标识
+IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
+{
+	find /etc/nginx/conf.d -name "*.conf"
+	find /etc/nginx/sites-enabled ! -type d
+} | while read line; do [ "$line" ] && {
+	sudo sed -i 's/listen 80 default_server/listen 80/' "$line"
+	sudo sed -i 's/listen \[::\]:80 default_server/listen [::]:80/' "$line"
+}; done
 
-IFS='' read -r -d '' SSH_COMMAND <<EOT
+EOT
+
 # 配置http跳转https
-echo 'server {
-	listen 80 default_server;
-	return 301 https://\$http_host\$request_uri;
-}' | sudo tee /etc/nginx/conf.d/http_redirect.conf
-
-
+eval "$nginx_http_redirect"
 # 配置https服务
-echo "server {
-	listen 127.0.0.1:7443 ssl http2 proxy_protocol default_server;
-	set_real_ip_from 127.0.0.1;
-	real_ip_header proxy_protocol;
-	ssl_protocols TLSv1.2 TLSv1.3;
-	ssl_reject_handshake on;
-}
-
-server {
-	listen 127.0.0.1:7443 ssl http2 proxy_protocol;
-	set_real_ip_from 127.0.0.1;
-	real_ip_header X-Forwarded-For;
-	server_name blog.$server_domain www.$server_domain;
-	ssl_certificate /etc/nginx/cert/$server_domain.fullchain.crt;
-	ssl_certificate_key /etc/nginx/cert/$server_domain.key;
-	ssl_protocols TLSv1.2 TLSv1.3;
-	ssl_prefer_server_ciphers on;
-	ssl_ciphers ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305;
-	ssl_ecdh_curve secp521r1:secp384r1:secp256r1:x25519;
-
-	location $websocket_path {
-		if (\\\$http_upgrade != "websocket") {
-			return 404;
-		}
-		proxy_redirect off;
-		proxy_pass http://127.0.0.1:2001;
-		proxy_http_version 1.1;
-		proxy_set_header Upgrade \\\$http_upgrade;
-		proxy_set_header Connection "upgrade";
-		proxy_set_header Host \\\$host;
-		proxy_set_header X-Forwarded-For \\\$proxy_add_x_forwarded_for;
-	}
-
-	location / {
-		add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-		root /home/$username/www/hexoblog;
-		index index.html;
-	}
-}" | sudo tee /etc/nginx/conf.d/https_from_xray.conf
-
-
+eval "$nginx_https_from_xray"
+# 配置sni分流
+eval "$nginx_stream_sni_proxy"
 # 配置xray服务
-echo '{
-  "log": {
-    "loglevel": "warning",
-    "error": "/var/log/xray/error.log",
-    "access": "/var/log/xray/access.log"
-  },
-  "inbounds": [
-    {
-      "port": 443, //VLESS+Vision+REALITY 监听端口
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "$vless_reality_id", //修改为自己的 UUID
-            "flow": "xtls-rprx-vision", //启用 XTLS Vision
-            "email": "443@gmail.com"
-          }
-        ],
-        "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false, //选填，若为 true 输出调试信息。
-          "dest": 7443, //转发给自己的网站监听端口
-          "xver": 2, //开启 PROXY protocol 发送，发送真实来源 IP 和端口给自己的网站。 1 或 2 表示 PROXY protocol 版本。
-          "serverNames": [ //必填，客户端可用的 serverName 列表，暂不支持 * 通配符。
-            "blog.$server_domain" //修改为自己的网站域名
-          ],
-          "privateKey": "$vless_reality_prk", //修改为自己执行 ./xray x25519 后生成的一对密钥中私钥
-          "shortIds": [ //必填，客户端可用的 shortId 列表，可用于区分不同的客户端。
-            "$vless_reality_sid1",
-            "$vless_reality_sid2" //若有此项，客户端 shortId 可为空。若不为空，可 0 到 f（0123456789abcdef），长度为 2 的倍数，长度上限为 16 。
-          ]
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
-      }
-    },
-    {
-      "listen": "127.0.0.1", //只监听本机，避免本机外的机器探测到下面端口。
-      "port": 2001, //VLESS+WebSocket 监听端口
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "$vless_websocket_id", //修改为自己的 UUID
-            "email": "2001@gmail.com"
-          }
-        ],
-    "decryption": "none"
-      },
-      "streamSettings": {
-        "network": "ws",
-        "security": "none",
-        "wsSettings": {
-          "path": "$websocket_path" //修改为自己的路径
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls"
-        ]
-      }
-    }
-  ],
-  "routing": {
-    "rules": [
-      {
-        "type": "field",
-        "protocol": [
-          "bittorrent"
-        ],
-        "outboundTag": "blocked"
-      }
-    ]
-  },
-  "outbounds": [
-    {
-      "protocol": "freedom",
-      "settings": {}
-    },
-    {
-      "tag": "blocked",
-      "protocol": "blackhole",
-      "settings": {}
-    }
-  ]
-}' | sudo tee /usr/local/etc/xray/config.json
+eval "$xray_config"
 
+IFS='' read -r -d '' SSH_COMMAND <<"EOT"
 # 设置最简单网页
 mkdir -p ~/www/hexoblog
 echo "This simple html test!" > ~/www/hexoblog/index.html
@@ -223,12 +109,14 @@ sudo systemctl restart nginx
 mkdir -p ~/git/repo
 git init --bare ~/git/repo/hexoblog.git
 echo '#!/bin/bash
-git --work-tree=\$HOME/www/hexoblog --git-dir=\$HOME/git/repo/hexoblog.git checkout -f' > ~/git/repo/hexoblog.git/hooks/post-receive
+git --work-tree=$HOME/www/hexoblog --git-dir=$HOME/git/repo/hexoblog.git checkout -f' > ~/git/repo/hexoblog.git/hooks/post-receive
 chmod +x ~/git/repo/hexoblog.git/hooks/post-receive
 
 EOT
+SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+
+$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMANDS"
 
 
 # 生成vless分享链接
@@ -294,6 +182,13 @@ vless_link
 echo "--------------------------------"
 fp=firefox
 sid=$vless_reality_sid2
+vless_link
+
+echo "--------------------------------"
+remarks="VLESS+H2C+REALITY.blog.$server_domain"
+id=$vless_h2c_id
+flow=
+type=h2
 vless_link
 
 echo "--------------------------------"

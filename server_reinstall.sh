@@ -1,8 +1,12 @@
 #!/bin/bash
 
 [ -x "$0" -a "$0" != "bash" ] && {
-	IFS='' read -r -d '' checkcmd_install < "$(dirname "$(readlink -f "$0")")/shell_common/checkcmd_install.sh"
-} || {
+	scp_dir="$(dirname "$(readlink -f "$0")")"
+	[ "$(ls "$scp_dir/shell_common")" ]
+} && {
+	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
+}
+[ $? -ne 0 ] && {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
 }
 
