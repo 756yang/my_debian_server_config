@@ -35,15 +35,13 @@ bash -c "$checkcmd_install" @ ssh openssl grep "gawk|awk" sed xargs find sponge 
 
 read -p "please input you server address:port ? " myserver
 read -p "please input you server username (not root)? " username
-mysshport=${myserver##*:}
-myserver=${myserver%:*}
+[[ "$myserver" =~ ":" ]] && mysshport="${myserver##*:}" && myserver="${myserver%:*}"
+[ -z "$mysshport" ] && mysshport=22
 
 echo "please input your email:"
 my_email=`code_decrypt SZjkY0mA9PPHKlujovTT3OM=`
-
 echo "please input your dns_api_key with format dnsname:apikey"
 dns_api_key=`code_decrypt Nsi/NQ3ZqK7OJi+wsruDgL64IZwsdfCGUfepr4F33NgMPg==`
-
 echo "please input your server_domain:"
 server_domain=`code_decrypt C8CzPgrRq++AcGs=`
 
@@ -83,7 +81,7 @@ ssh-copy-id $username@$myserver -p $mysshport
 
 # 自动检查命令，必要时安装对应软件
 IFS='' read -r -d '' SSH_COMMAND <<EOT
-function checkcmd_install {$checkcmd_install}
+function checkcmd_install { $checkcmd_install }
 checkcmd_install "gawk|awk" sponge
 EOT
 $sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
@@ -91,7 +89,7 @@ $sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 修改sshd配置，禁用密码登录并开启密钥登录
-function awk_conf {$awk_conf}
+function awk_conf { $awk_conf }
 cat /etc/ssh/sshd_config | awk_conf "PermitRootLogin yes"\\
 	"PasswordAuthentication no" "RSAAuthentication yes"\\
 	"PubkeyAuthentication yes" | sudo sponge /etc/ssh/sshd_config

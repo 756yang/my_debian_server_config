@@ -33,17 +33,17 @@ bash -c "$checkcmd_install" @ ssh sshpass openssl grep "gawk|awk" sed xargs find
 
 read -p "please input you server address:port ? " myserver
 read -p "please input you server username:password ? " username
-mysshport=${myserver##*:}
-myserver=${myserver%:*}
+[[ "$myserver" =~ ":" ]] && mysshport="${myserver##*:}" && myserver="${myserver%:*}"
+[ -z "$mysshport" ] && mysshport=22
 [[ "$username" =~ ":" ]] && mypassword="${username#*:}" && username="${username%%:*}"
-[ -n "mypassword" ] && sshcmd='sshpass -p "'$mypassword'" ssh' || sshcmd=ssh
+[ -n "$mypassword" ] && sshcmd='sshpass -p "'"$mypassword"'" ssh' || sshcmd=ssh
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
-function checkcmd_install {$checkcmd_install}
+function checkcmd_install { $checkcmd_install }
 # which.debianutils 检查是否Debian系统，仅支持Debian
 checkcmd_install which.debianutils curl sed grep "gawk|awk" sponge
 EOT
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
 
 
@@ -104,7 +104,7 @@ sudo sed -i 's/$mail_public_ip:443:443/127.0.0.1:8443:443/' /mailu/docker-compos
 subnet_ip="\$(cat /mailu/mailu.env | grep 'SUBNET=')"
 subnet_ip=\${subnet_ip#*=}
 subnet_ip=\${subnet_ip%.*}.1
-function awk_conf {$awk_conf}
+function awk_conf { $awk_conf }
 cat /mailu/mailu.env | awk_conf "REAL_IP_HEADER="\\
 		"PROXY_PROTOCOL=http"\\
 		"REAL_IP_FROM=$mail_public_ip,""\$subnet_ip" | sudo sponge /mailu/mailu.env
@@ -143,6 +143,6 @@ sudo docker compose -p mailu exec admin flask mailu admin $username $server_doma
 EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMANDS"
+eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMANDS"'
 
 

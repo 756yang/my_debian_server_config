@@ -23,44 +23,23 @@ bash -c "$checkcmd_install" @ ssh sshpass openssl grep "gawk|awk" sed xargs find
 
 read -p "please input you server address:port ? " myserver
 read -p "please input you server username:password ? " username
-mysshport=${myserver##*:}
-myserver=${myserver%:*}
+[[ "$myserver" =~ ":" ]] && mysshport="${myserver##*:}" && myserver="${myserver%:*}"
+[ -z "$mysshport" ] && mysshport=22
 [[ "$username" =~ ":" ]] && mypassword="${username#*:}" && username="${username%%:*}"
-[ -n "mypassword" ] && sshcmd='sshpass -p "'$mypassword'" ssh' || sshcmd=ssh
+[ -n "$mypassword" ] && sshcmd='sshpass -p "'"$mypassword"'" ssh' || sshcmd=ssh
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
-function checkcmd_install {$checkcmd_install}
+function checkcmd_install { $checkcmd_install }
 checkcmd_install wget grep git sponge find
 EOT
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
+eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
-
-
-IFS='' read -r -d '' SSH_COMMAND <<"EOT"
-# 安装xray-core
-sudo bash -c "$(wget -O - https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
-
-# 配置tcp_bbr加速网络
-if ! { lsmod | grep tcp_bbr >/dev/null; }; then
-	if ! { grep '^[^#]*net\.ipv4\.tcp_congestion_control' /etc/sysctl.conf >/dev/null; }; then
-		awk '{print}END{print "net.ipv4.tcp_congestion_control=bbr"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
-		if ! { grep '^[^#]*net\.core\.default_qdisc' /etc/sysctl.conf >/dev/null; }; then
-			awk '{print}END{print "net.core.default_qdisc=fq"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
-		fi
-		sudo sysctl -p
-	fi
-fi
-EOT
-
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 
 
 echo "please input your server_domain:"
 server_domain=`code_decrypt C8CzPgrRq++AcGs=`
-
 echo "please input your websocket_path:"
 websocket_path=`code_decrypt V5mNBjXC8ame`
-
 echo "please input your vless_reality_id:"
 vless_reality_id=`code_decrypt SprlZE7S8fPZKSLl4/eEgOroPZkqcqHKBfP3+ost3IJdbXi8` # REALITY配置的用户id，需生成
 echo "please input your vless_reality_prk:"
@@ -76,8 +55,25 @@ vless_h2c_id=`code_decrypt ScjlMUeCoqPZJiPrsfeE1rvpPcF9Lv3KCqCtqo932NldPSm1` # H
 echo "please input your vless_websocket_id:"
 vless_websocket_id=`code_decrypt QcrgZUfR9KDZeSi2tveEgrjrPZpwJ6DKUa76/oAq3d5dPy/g` # WebSocket配置的用户id，需生成
 
-# 删除nginx的http 80端口的default_server标识
 IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
+# 安装xray-core
+sudo bash -c "$(wget -O - https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+
+# 配置tcp_bbr加速网络
+if ! { lsmod | grep tcp_bbr >/dev/null; }; then
+	if ! { grep '^[^#]*net\.ipv4\.tcp_congestion_control' /etc/sysctl.conf >/dev/null; }; then
+		awk '{print}END{print "net.ipv4.tcp_congestion_control=bbr"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
+		if ! { grep '^[^#]*net\.core\.default_qdisc' /etc/sysctl.conf >/dev/null; }; then
+			awk '{print}END{print "net.core.default_qdisc=fq"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
+		fi
+		sudo sysctl -p
+	fi
+fi
+
+EOT
+
+# 删除nginx的http 80端口的default_server标识
+IFS='' read -r -d '' SSH_COMMAND <<"EOT"
 {
 	find /etc/nginx/conf.d -name "*.conf"
 	find /etc/nginx/sites-enabled ! -type d
@@ -87,6 +83,7 @@ IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
 }; done
 
 EOT
+SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
 # 配置http跳转https
 eval "$nginx_http_redirect"
@@ -116,7 +113,7 @@ EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
 
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMANDS"
+eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMANDS"'
 
 
 # 生成vless分享链接
