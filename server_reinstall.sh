@@ -5,8 +5,8 @@
 	[ "$(ls "$scp_dir/shell_common")" ]
 } && {
 	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
-}
-[ $? -ne 0 ] && {
+	# read命令读取文件退出状态是1，表示遇到了EOF
+} || {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
 }
 

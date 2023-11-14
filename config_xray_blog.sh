@@ -9,8 +9,7 @@
 	IFS='' read -r -d '' nginx_https_from_xray < "$scp_dir/script/nginx/https_from_xray.conf"
 	IFS='' read -r -d '' nginx_stream_sni_proxy < "$scp_dir/script/nginx/stream_sni_proxy.conf"
 	IFS='' read -r -d '' xray_config < "$scp_dir/script/xray/config.json"
-}
-[ $? -ne 0 ] && {
+} || {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
 	nginx_http_redirect="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/nginx/http_redirect.conf)"
 	nginx_https_from_xray="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/nginx/https_from_xray.conf)"

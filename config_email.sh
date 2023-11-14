@@ -8,8 +8,7 @@
 	IFS='' read -r -d '' awk_conf < "$scp_dir/shell_common/awk_conf.sh"
 	IFS='' read -r -d '' mailu_setup_mailu < "$scp_dir/script/mailu/setup_mailu.py"
 	IFS='' read -r -d '' nginx_http_mailu_acme < "$scp_dir/script/nginx/http_mailu_acme.conf"
-}
-[ $? -ne 0 ] && {
+} || {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
 	awk_conf="$(wget -qO- https://github.com/756yang/shell_common/raw/main/awk_conf.sh)"
 	mailu_setup_mailu="$(wget -qO- https://github.com/756yang/my_debian_server_config/raw/main/script/mailu/setup_mailu.py)"
