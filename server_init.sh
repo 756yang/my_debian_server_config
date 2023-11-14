@@ -24,7 +24,7 @@ EOF
 } && {
 	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
 	IFS='' read -r -d '' awk_conf < "$scp_dir/shell_common/awk_conf.sh"
-} || {
+true;} || {
 	checkcmd_install="$(wget -qO- https://github.com/756yang/shell_common/raw/main/checkcmd_install.sh)"
 	awk_conf="$(wget -qO- https://github.com/756yang/shell_common/raw/main/awk_conf.sh)"
 }
