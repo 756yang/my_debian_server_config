@@ -47,6 +47,9 @@ echo '{
             "$vless_reality_sid1",
             "$vless_reality_sid2" //若有此项，客户端 shortId 可为空。若不为空，可 0 到 f（0123456789abcdef），长度为 2 的倍数，长度上限为 16 。
           ]
+        },
+        "tcpSettings": {
+          "acceptProxyProtocol": true //开启 PROXY protocol 接收，接收 Nginx SNI 分流前真实来源 IP 和端口。
         }
       },
       "sniffing": {

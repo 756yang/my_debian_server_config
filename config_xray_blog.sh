@@ -4,6 +4,9 @@
 	scp_dir="$(dirname "$(readlink -f "$0")")"
 	[ "$(ls "$scp_dir/shell_common")" ] && [ "$(ls "$scp_dir/script")" ]
 } && {
+	IFS='' read -r -d '' shell_goto < "$scp_dir/shell_common/shell_goto.sh"
+	# 如果第一个参数是n或N，则仅仅打印xray订阅链接
+	[ "$1" = n -o "$1" = N ] && eval "$shell_goto" vless_config || shell_goto=""
 	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
 	IFS='' read -r -d '' nginx_http_redirect < "$scp_dir/script/nginx/http_redirect.conf"
 	IFS='' read -r -d '' nginx_https_from_xray < "$scp_dir/script/nginx/https_from_xray.conf"
@@ -31,9 +34,10 @@ IFS='' read -r -d '' SSH_COMMAND <<EOT
 function checkcmd_install { $checkcmd_install }
 checkcmd_install wget grep git sponge find
 EOT
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"'
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
 
+#vless_config#
 
 echo "please input your server_domain:"
 server_domain=`code_decrypt C8CzPgrRq++AcGs=`
@@ -54,15 +58,21 @@ vless_h2c_id=`code_decrypt ScjlMUeCoqPZJiPrsfeE1rvpPcF9Lv3KCqCtqo932NldPSm1` # H
 echo "please input your vless_websocket_id:"
 vless_websocket_id=`code_decrypt QcrgZUfR9KDZeSi2tveEgrjrPZpwJ6DKUa76/oAq3d5dPy/g` # WebSocket配置的用户id，需生成
 
+# 如果此脚本以文件执行且第一个参数是n或N，则跳转到打印订阅链接处
+[ -n "$shell_goto" ] && eval "$shell_goto" vless_print
+
 IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
+# 安装nginx的stream模块
+sudo apt install libnginx-mod-stream
+
 # 安装xray-core
 sudo bash -c "$(wget -O - https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
 # 配置tcp_bbr加速网络
-if ! { lsmod | grep tcp_bbr >/dev/null; }; then
-	if ! { grep '^[^#]*net\.ipv4\.tcp_congestion_control' /etc/sysctl.conf >/dev/null; }; then
+if ! { lsmod | grep tcp_bbr &>/dev/null;}; then
+	if ! grep '^[^#]*net\.ipv4\.tcp_congestion_control' /etc/sysctl.conf &>/dev/null; then
 		awk '{print}END{print "net.ipv4.tcp_congestion_control=bbr"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
-		if ! { grep '^[^#]*net\.core\.default_qdisc' /etc/sysctl.conf >/dev/null; }; then
+		if ! grep '^[^#]*net\.core\.default_qdisc' /etc/sysctl.conf &>/dev/null; then
 			awk '{print}END{print "net.core.default_qdisc=fq"}' /etc/sysctl.conf | sudo sponge /etc/sysctl.conf
 		fi
 		sudo sysctl -p
@@ -112,10 +122,12 @@ EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
 
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMANDS"'
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMANDS"'
 
 
 # 生成vless分享链接
+
+#vless_print#
 
 function vless_link ()
 {
@@ -133,26 +145,26 @@ function vless_link ()
 			}
 		}
 	}'
-	id=$(echo -n "$id" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	address=$(echo -n "$address" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	port=$(echo -n "$port" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	encryption=$(echo -n "$encryption" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	flow=$(echo -n "$flow" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	security=$(echo -n "$security" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	headerType=$(echo -n "$headerType" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	host=$(echo -n "$host" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	path=$(echo -n "$path" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	alpn=$(echo -n "$alpn" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	sni=$(echo -n "$sni" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	fp=$(echo -n "$fp" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	pbk=$(echo -n "$pbk" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	sid=$(echo -n "$sid" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	spx=$(echo -n "$spx" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	type=$(echo -n "$type" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	remarks=$(echo -n "$remarks" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
-	printf "%s" "vless://$id@$address:$port?encryption=$encryption&flow=$flow&security=$security"\
-			"&headerType=$headerType&host=$host&path=$path&alpn=$alpn"\
-			"&sni=$sni&fp=$fp&pbk=$pbk&sid=$sid&spx=$spx&type=$type#$remarks"$'\n' | sed -e 's/[_A-Za-z0-9]*=&//g'
+	id0=$(echo -n "$id" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	address0=$(echo -n "$address" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	port0=$(echo -n "$port" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	encryption0=$(echo -n "$encryption" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	flow0=$(echo -n "$flow" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	security0=$(echo -n "$security" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	headerType0=$(echo -n "$headerType" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	host0=$(echo -n "$host" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	path0=$(echo -n "$path" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	alpn0=$(echo -n "$alpn" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	sni0=$(echo -n "$sni" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	fp0=$(echo -n "$fp" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	pbk0=$(echo -n "$pbk" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	sid0=$(echo -n "$sid" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	spx0=$(echo -n "$spx" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	type0=$(echo -n "$type" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	remarks0=$(echo -n "$remarks" | od -tu1 -An -v | LC_ALL=C awk "$awk_script")
+	printf "%s" "vless://$id0@$address0:$port0?encryption0=$encryption0&flow=$flow0&security=$security0"\
+			"&headerType=$headerType0&host=$host0&path=$path0&alpn=$alpn0"\
+			"&sni=$sni0&fp=$fp0&pbk=$pbk0&sid=$sid0&spx=$spx0&type=$type0#$remarks0"$'\n' | sed -e 's/[_A-Za-z0-9]*=&//g'
 }
 
 echo "--------------------------------"
@@ -176,6 +188,7 @@ alpn= # 应用层协商
 
 vless_link
 echo "--------------------------------"
+remarks="VLESS-Vision-REALITY.blog.$server_domain"
 fp=firefox
 sid=$vless_reality_sid2
 vless_link

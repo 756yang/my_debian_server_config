@@ -41,7 +41,7 @@ IFS='' read -r -d '' SSH_COMMAND <<EOT
 function checkcmd_install { $checkcmd_install }
 checkcmd_install tar gzip hostname openssl sudo wget sed cpio
 EOT
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"'
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
 
 # 若tar命令将文件打包输出到终端，会报错：
@@ -54,7 +54,7 @@ tar -cvzf - /etc/hosts\
 		/etc/resolv.conf\
 		/etc/sysctl.conf
 EOT
-eval "$sshcmd" $username@$myserver -p $mysshport '"$SSH_COMMAND"' > $myserver.conf.tar.gz
+eval "$sshcmd" -p $mysshport $username@$myserver '"$SSH_COMMAND"' > $myserver.conf.tar.gz
 
 echo "please input install-script extra options (--china to use apt mirrors)? "
 read install_options
@@ -67,7 +67,7 @@ sudo bash -c "\$(wget -qO- https://github.com/756yang/debian_vps_reinstall/raw/m
 echo "root password is: "\$password
 sudo reboot
 EOT
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"' | tee $myserver.pass
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMAND"' | tee $myserver.pass
 mypassword=$(cat $myserver.pass | grep "root password is:" | awk '{print $4}')
 
 sleep 120

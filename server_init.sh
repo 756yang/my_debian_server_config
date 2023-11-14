@@ -48,19 +48,27 @@ IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 更新软件包和系统
 apt update && apt upgrade
 # 安装必要软件包
-apt install sudo vim ufw socat nginx wget
+apt install sudo vim ufw socat nginx wget cron sed grep
+# 确保本机正确解析域名
+sed -i 's/^.*[ \\t]$server_domain\$/$myserver $server_domain/' /etc/hosts
+grep '^$myserver $server_domain\$' /etc/hosts &>/dev/null || {
+	[ \$(tail -n 1 /etc/hosts | wc -l) == 0 ] && echo >> /etc/hosts
+	echo '$myserver $server_domain' >> /etc/hosts
+}
 # 配置acme.sh自动申请免费ssl证书
 mkdir /etc/nginx/cert
 wget -O -  https://get.acme.sh | sh -s email=$my_email
 source ~/.bashrc
+shopt -s expand_aliases
 acme.sh --upgrade --auto-upgrade
 acme.sh --set-default-ca --server letsencrypt
 dns_api_key=${dns_api_key,,}
 dns_api_key=\${dns_api_key^}
 export \${dns_api_key%:*}_Key=\${dns_api_key##*:}
 dns_api_key=\${dns_api_key,}
-read -p "please input a dnssleep time (default is 300): " dnssleep
-acme.sh --issue --dns dns_\${dns_api_key%:*} --dnssleep \${dnssleep:-300}\\
+# dnssleep参数必须足够长，需等待acme.sh添加dns的TXT记录生效
+# 或者也可不用dnssleep参数，此时服务器应该可以访问谷歌DNS
+acme.sh --issue --dns dns_\${dns_api_key%:*} --dnssleep 1800\\
 		-d $server_domain -d '*.$server_domain' --keylength ec-256 --force
 acme.sh --install-cert --ecc -d $server_domain\\
 		--cert-file "/etc/nginx/cert/$server_domain.crt"\\
@@ -71,20 +79,18 @@ acme.sh --install-cert --ecc -d $server_domain\\
 useradd -G sudo -s /bin/bash -d "/home/$username" -m "$username"
 passwd "$username"
 EOT
-
-ssh root@$myserver -p $mysshport -t "$SSH_COMMAND"
+ssh -p $mysshport root@$myserver -t "$SSH_COMMAND"
 
 # 复制本地ssh公钥到服务器
-ssh-copy-id $username@$myserver -p $mysshport
+ssh-copy-id -p $mysshport $username@$myserver
 
 
 # 自动检查命令，必要时安装对应软件
-IFS='' read -r -d '' SSH_COMMAND <<EOT
+IFS='' read -r -d '' SSH_COMMANDS <<EOT
 function checkcmd_install { $checkcmd_install }
 checkcmd_install "gawk|awk" sponge
+
 EOT
-$sshcmd $username@$myserver -p $mysshport -t "$SSH_COMMAND"
-[ $? -ne 0 ] && exit 1
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 修改sshd配置，禁用密码登录并开启密钥登录
@@ -92,17 +98,25 @@ function awk_conf { $awk_conf }
 cat /etc/ssh/sshd_config | awk_conf "PermitRootLogin yes"\\
 	"PasswordAuthentication no" "RSAAuthentication yes"\\
 	"PubkeyAuthentication yes" | sudo sponge /etc/ssh/sshd_config
+cat /etc/ssh/sshd_config
+
 EOT
+SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
-ssh $username@$myserver -p $mysshport -t "$SSH_COMMAND"
 
+IFS='' read -r -d '' SSH_COMMAND <<EOT
 # 配置防火墙
-ssh $username@$myserver -p $mysshport -t "
-	sudo ufw allow 80 # 开放HTTP端口
-	sudo ufw allow 443 # 开放HTTPS端口
-	sudo ufw allow $mysshport # 开放SSH端口
-	sudo ufw enable # 开启防火墙
-	sudo ufw default deny # 默认关闭端口
-	sudo ufw status # 查看防火墙状态
-"
+sudo ufw allow 80 # 开放HTTP端口
+sudo ufw allow 443 # 开放HTTPS端口
+sudo ufw allow $mysshport # 开放SSH端口
+sudo ufw enable # 开启防火墙
+sudo ufw default deny # 默认关闭端口
+sudo ufw status # 查看防火墙状态
+sudo reboot
+
+EOT
+SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
+
+ssh -p $mysshport $username@$myserver -t "$SSH_COMMANDS"
+[ $? -ne 0 ] && exit 1
 

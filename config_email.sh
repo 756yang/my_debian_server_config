@@ -42,7 +42,7 @@ function checkcmd_install { $checkcmd_install }
 # which.debianutils 检查是否Debian系统，仅支持Debian
 checkcmd_install which.debianutils curl sed grep "gawk|awk" sponge
 EOT
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMAND"'
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
 
 
@@ -52,7 +52,7 @@ echo "please input your mail_site_name:"
 mail_site_name=`code_decrypt Nci7PF7Wq7PUTHKzva7R3A==`
 echo "please input your mail_admin_pass:"
 mail_admin_pass=`code_decrypt Fci7PCHpjJihVUI=`
-mail_public_ip=$($sshcmd $username@$myserver -p $mysshport "curl ifconfig.me 2>/dev/null")
+mail_public_ip=$(eval "$sshcmd" -p $mysshport $username@$myserver '"curl ifconfig.me 2>/dev/null"')
 mailu_setup_mailu="$(echo -n "$mailu_setup_mailu" | sed 's/\$server_domain/'$server_domain'/g'\
 		| sed 's/\$mail_site_name/'$mail_site_name'/g'\
 		| sed 's/\$mail_public_ip/'$mail_public_ip'/g'\
@@ -142,6 +142,6 @@ sudo docker compose -p mailu exec admin flask mailu admin $username $server_doma
 EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
-eval "$sshcmd" $username@$myserver -p $mysshport -t '"$SSH_COMMANDS"'
+eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMANDS"'
 
 
