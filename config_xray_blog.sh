@@ -79,6 +79,10 @@ if ! { lsmod | grep tcp_bbr &>/dev/null;}; then
 	fi
 fi
 
+# ufw开启UDP动态端口，以允许xray实现FullCone
+sudo ufw allow $(cat /proc/sys/net/ipv4/ip_local_port_range | awk '{print $1 ":" $2}')/udp
+sudo ufw status verbose
+
 EOT
 
 # 删除nginx的http 80端口的default_server标识

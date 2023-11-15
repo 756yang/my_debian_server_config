@@ -110,8 +110,9 @@ sudo ufw allow 80 # 开放HTTP端口
 sudo ufw allow 443 # 开放HTTPS端口
 sudo ufw allow $mysshport # 开放SSH端口
 sudo ufw enable # 开启防火墙
-sudo ufw default deny # 默认关闭端口
-sudo ufw status # 查看防火墙状态
+sudo ufw default deny incoming # 默认禁止入站
+sudo ufw default allow outgoing # 默认允许出站
+sudo ufw status verbose # 查看防火墙状态
 sudo reboot
 
 EOT

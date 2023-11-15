@@ -4,6 +4,12 @@
 	scp_dir="$(dirname "$(readlink -f "$0")")"
 	[ "$(ls "$scp_dir/shell_common")" ] && [ "$(ls "$scp_dir/script")" ]
 } && {
+	IFS='' read -r -d '' shell_goto < "$scp_dir/shell_common/shell_goto.sh"
+	# 如果第一个参数是n或N，则仅仅打印mailu管理账号信息
+	[ "$1" = n -o "$1" = N ] && {
+		read -p "please input you username: " username
+		eval "$shell_goto" mailu_config || shell_goto=""
+	}
 	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
 	IFS='' read -r -d '' awk_conf < "$scp_dir/shell_common/awk_conf.sh"
 	IFS='' read -r -d '' mailu_setup_mailu < "$scp_dir/script/mailu/setup_mailu.py"
@@ -45,6 +51,7 @@ EOT
 eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMAND"'
 [ $? -ne 0 ] && exit 1
 
+#mailu_config#
 
 echo "please input your server_domain:"
 server_domain=`code_decrypt C8CzPgrRq++AcGs=`
@@ -52,12 +59,17 @@ echo "please input your mail_site_name:"
 mail_site_name=`code_decrypt Nci7PF7Wq7PUTHKzva7R3A==`
 echo "please input your mail_admin_pass:"
 mail_admin_pass=`code_decrypt Fci7PCHpjJihVUI=`
+
+# 如果此脚本以文件执行且第一个参数是n或N，则跳转到打印账号信息处
+[ -n "$shell_goto" ] && eval "$shell_goto" mailu_print
+
 mail_public_ip=$(eval "$sshcmd" -p $mysshport $username@$myserver '"curl ifconfig.me 2>/dev/null"')
-mailu_setup_mailu="$(echo -n "$mailu_setup_mailu" | sed 's/\$server_domain/'$server_domain'/g'\
-		| sed 's/\$mail_site_name/'$mail_site_name'/g'\
-		| sed 's/\$mail_public_ip/'$mail_public_ip'/g'\
-		| sed 's/\$username/'$username'/g')"
+mailu_setup_mailu="$(echo -n "$mailu_setup_mailu" | sed 's/\$server_domain/'"$server_domain"'/g'\
+		| sed 's/\$mail_site_name/'"$mail_site_name"'/g'\
+		| sed 's/\$mail_public_ip/'"$mail_public_ip"'/g'\
+		| sed 's/\$username/'"$username"'/g')"
 mailu_config_cmd="$(python3 -c "$mailu_setup_mailu")"
+
 
 IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
 # 检查 docker compose 并尝试安装
@@ -111,21 +123,28 @@ cat /mailu/mailu.env | awk_conf "REAL_IP_HEADER="\\
 # 自动编辑 nginx_sni 分流配置
 cat /etc/nginx/modules-enabled/stream_sni_proxy.conf | awk 'BEGIN{sni_stream=0} {
 	print \$0;
-	if(sni_stream==0)
-		if(match(\$0,"[ \t]?stream {"))sni_stream=1;
+	if(sni_stream==0){
+		if(match(\$0,"[ \\\\t]?stream \\\\{"))sni_stream=1;
+	}
 	else if(sni_stream==1){
-		if(match(\$0,"[ \t]?map \$ssl_preread_server_name \$backend_name {")){
+		if(match(\$0,"[ \\\\t]?map \\\$ssl_preread_server_name \\\$backend_name \\\\{")){
 			sni_stream=2;
-			printf("\t\tmail.$server_domain mailu;\n");
+			printf("\\t\\tmail.$server_domain mailu;\\n");
 		}
 	}
 	else if(sni_stream==2){
-		if(match(\$0,"^[ \t]*}")){
+		if(match(\$0,"^[ \\\\t]*\\\\}")){
 			sni_stream=3;
-			printf("\tupstream mailu {\n\t\tserver 127.0.0.1:8443;\n\t}\n");
+			printf("\\tupstream mailu {\\n\\t\\tserver 127.0.0.1:8443;\\n\\t}\\n");
 		}
 	}
 }' | sudo sponge /etc/nginx/modules-enabled/stream_sni_proxy.conf
+echo "-------------------/mailu/docker-compose.yml--------------------"
+cat /mailu/docker-compose.yml
+echo "------------------------/mailu/mailu.env------------------------"
+cat /mailu/mailu.env
+echo "--------/etc/nginx/modules-enabled/stream_sni_proxy.conf--------"
+cat /etc/nginx/modules-enabled/stream_sni_proxy.conf
 
 EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
@@ -134,6 +153,8 @@ SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 eval "$nginx_http_mailu_acme"
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
+# 最好热重载nginx，重启会导致丢失xray代理的ssh连接
+sudo systemctl reload nginx
 # 安装 mailu 并设置密码
 cd /mailu
 sudo docker compose -p mailu up -d
@@ -144,4 +165,9 @@ SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
 
 eval "$sshcmd" -p $mysshport $username@$myserver -t '"$SSH_COMMANDS"'
 
+#mailu_print#
+
+echo "You mail server admin account is: $username@$server_domain"
+echo "and the password is: $mail_admin_pass"
+echo "You mail https link is: https://mail.$server_domain"
 
