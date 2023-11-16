@@ -8,8 +8,8 @@
 	# 如果第一个参数是n或N，则仅仅打印mailu管理账号信息
 	[ "$1" = n -o "$1" = N ] && {
 		read -p "please input you username: " username
-		eval "$shell_goto" mailu_config || shell_goto=""
-	}
+		eval "$shell_goto" mailu_config
+	} || shell_goto=""
 	IFS='' read -r -d '' checkcmd_install < "$scp_dir/shell_common/checkcmd_install.sh"
 	IFS='' read -r -d '' awk_conf < "$scp_dir/shell_common/awk_conf.sh"
 	IFS='' read -r -d '' mailu_setup_mailu < "$scp_dir/script/mailu/setup_mailu.py"
@@ -124,7 +124,11 @@ cat /mailu/mailu.env | awk_conf "REAL_IP_HEADER="\\
 cat /etc/nginx/modules-enabled/stream_sni_proxy.conf | awk 'BEGIN{sni_stream=0} {
 	print \$0;
 	if(sni_stream==0){
-		if(match(\$0,"[ \\\\t]?stream \\\\{"))sni_stream=1;
+		if(match(\$0,"[ \\\\t]?stream \\\\{")){
+			sni_stream=1;
+			printf("\\tserver {\\n\\t\\tlisten unix:/dev/shm/mailu_acme.sock;\\n");
+			printf("\\t\\tproxy_pass 127.0.0.1:8080;\\n\\t\\tproxy_protocol on;\\n\\t}\\n");
+		}
 	}
 	else if(sni_stream==1){
 		if(match(\$0,"[ \\\\t]?map \\\$ssl_preread_server_name \\\$backend_name \\\\{")){
@@ -158,6 +162,12 @@ sudo systemctl reload nginx
 # 安装 mailu 并设置密码
 cd /mailu
 sudo docker compose -p mailu up -d
+# 睡眠等待mailu证书申请成功
+while { echo "Wait for mailu TLS setup..." && sleep 5;}; do
+	sudo docker exec \$(sudo docker ps | grep mailu/nginx | awk '{print \$1}')\\
+		cat /etc/nginx/nginx.conf | grep "listen 443 ssl" &>/dev/null && break
+done
+# 设置mailu管理员账号，需等待服务完全启动，以免报错"sqlite3.OperationalError: no such table: domain"
 sudo docker compose -p mailu exec admin flask mailu admin $username $server_domain $mail_admin_pass
 
 EOT
