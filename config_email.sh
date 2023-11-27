@@ -163,10 +163,12 @@ sudo systemctl reload nginx
 cd /mailu
 sudo docker compose -p mailu up -d
 # 睡眠等待mailu证书申请成功
-while { echo "Wait for mailu TLS setup..." && sleep 5;}; do
+while echo "Wait for mailu TLS setup..."; do
 	sudo docker exec \$(sudo docker ps | grep mailu/nginx | awk '{print \$1}')\\
 		cat /etc/nginx/nginx.conf | grep "listen 443 ssl" &>/dev/null && break
+	sleep 5
 done
+sleep 5
 # 设置mailu管理员账号，需等待服务完全启动，以免报错"sqlite3.OperationalError: no such table: domain"
 sudo docker compose -p mailu exec admin flask mailu admin $username $server_domain $mail_admin_pass
 

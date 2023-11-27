@@ -150,7 +150,7 @@ read mount_options
 [ -n "$mount_options" ] && {
 	[ "$mount_options" = y -o "$mount_options" = Y ] && mount_options="compress=zstd:1"
 	IFS='' read -r -d '' SSH_COMMAND <<EOT
-sed -i 's!\\(/[ \\t][ \\t]*btrfs[ \\t][ \\t]*\\)defaults!\\1$mount_options!' /etc/fstab
+sed -i 's!\\(/[ \\t][ \\t]*btrfs[ \\t][ \\t]*defaults\\)!\\1,$mount_options!' /etc/fstab
 
 EOT
 	SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
