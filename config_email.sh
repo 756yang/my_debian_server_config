@@ -63,13 +63,14 @@ mail_admin_pass=`code_decrypt Fci7PCHpjJihVUI=`
 # 如果此脚本以文件执行且第一个参数是n或N，则跳转到打印账号信息处
 [ -n "$shell_goto" ] && eval "$shell_goto" mailu_print
 
-mail_public_ip=$(eval "$sshcmd" -p $mysshport $username@$myserver '"curl ifconfig.me 2>/dev/null"')
+mail_public_ip=$myserver
 mailu_setup_mailu="$(echo -n "$mailu_setup_mailu" | sed 's/\$server_domain/'"$server_domain"'/g'\
 		| sed 's/\$mail_site_name/'"$mail_site_name"'/g'\
 		| sed 's/\$mail_public_ip/'"$mail_public_ip"'/g'\
 		| sed 's/\$username/'"$username"'/g')"
 mailu_config_cmd="$(python3 -c "$mailu_setup_mailu")"
-
+echo "$mailu_config_cmd"
+read -p "please check if error exists, and press any key to continue." ans
 
 IFS='' read -r -d '' SSH_COMMANDS <<"EOT"
 # 检查 docker compose 并尝试安装
@@ -171,6 +172,7 @@ done
 sleep 5
 # 设置mailu管理员账号，需等待服务完全启动，以免报错"sqlite3.OperationalError: no such table: domain"
 sudo docker compose -p mailu exec admin flask mailu admin $username $server_domain $mail_admin_pass
+sudo reboot # 重启服务，避免mailu连接不正常
 
 EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"

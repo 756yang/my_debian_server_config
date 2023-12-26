@@ -52,7 +52,9 @@ tar -cvzf - /etc/hosts\
 		/etc/hostname\
 		/etc/host.conf\
 		/etc/resolv.conf\
-		/etc/sysctl.conf
+		/etc/sysctl.conf\
+		/etc/network/interfaces\
+		/etc/network/interfaces.d
 EOT
 eval "$sshcmd" -p $mysshport $username@$myserver '"$SSH_COMMAND"' > $myserver.conf.tar.gz
 
@@ -62,8 +64,22 @@ read install_options
 IFS='' read -r -d '' SSH_COMMAND <<EOT
 sudo hostname \$HOSTNAME # 临时修改主机名
 sudo domainname \$(hostname -d) # 临时修改主机域
-password=\$(openssl rand -base64 9)
-sudo bash -c "\$(wget -qO- https://github.com/756yang/debian_vps_reinstall/raw/master/debi.sh)" @ --network-console --version 12 --filesystem btrfs --esp 500 --swap 100% --bbr --user root --password \$password --ethx --ssh-port $mysshport $install_options
+password=\$(openssl rand -base64 9) # 生成root密码
+# 配置静态网络环境
+install_options='--dns 8.8.8.8'
+[ "\$(ifconfig | grep '^eth[0-9]*:')" ] && install_options="\$install_options"' --ethx'
+install_options="\$install_options"" --ip $myserver"
+install_options="\$install_options"" --netmask \$(ifconfig | grep $myserver | awk '{print \$4}')"
+install_options="\$install_options"" --gateway \$(route -n | grep '^0.0.0.0' | awk '{print \$2}')"
+if [ -d /sys/firmware/efi ]; then
+	# 设置ESP分区大小
+	install_options="\$install_options"' --esp 500'
+else
+	# BIOS启动的VPS使用云内核
+	install_options="\$install_options"' --cloud-kernel'
+fi
+# 执行系统重装
+sudo bash -c "\$(wget -qO- https://github.com/756yang/debian_vps_reinstall/raw/master/debi.sh)" @ --network-console --version 12 --filesystem btrfs --swap 100% --bbr --user root --password \$password --ssh-port $mysshport \$install_options $install_options
 echo "root password is: "\$password
 sudo reboot
 EOT
@@ -100,6 +116,7 @@ old_myserver=$myserver
 	rm "$temp_file"
 }
 echo "login installer, press 'Ctrl+A' and then press '4' to monitor installation logs."
+sleep 3
 sshpass -p "$mypassword" ssh -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=/dev/null\
 		-o StrictHostKeyChecking=no installer@$myserver
 sleep 20
@@ -139,7 +156,10 @@ tar -cvzf $myserver.conf.tgz /etc/hosts\
 		/etc/hostname\
 		/etc/host.conf\
 		/etc/resolv.conf\
-		/etc/sysctl.conf
+		/etc/sysctl.conf\
+		/etc/network/interfaces\
+		/etc/network/interfaces.d
+rm -rf /etc/network/interfaces /etc/network/interfaces.d
 tar -xvzf $old_myserver.conf.tar.gz -C /
 rm $old_myserver.conf.tar.gz
 
@@ -157,6 +177,7 @@ EOT
 }
 
 IFS='' read -r -d '' SSH_COMMAND <<EOT
+apt install qemu-guest-agent btrfs-compsize
 reboot
 EOT
 SSH_COMMANDS="$SSH_COMMANDS""$SSH_COMMAND"
@@ -174,6 +195,8 @@ if { echo "$mount_options" | grep compress &>/dev/null;}; then
 	sshpass -p "$mypassword" ssh root@$myserver -p $mysshport -t\
 		"btrfs filesystem defragment -r -c$compress_options /"
 fi
+
+# btrfs支持基于子卷的快照，这为实现服务器数据备份与恢复提供了支持且无需供应商支持
 
 [ "$old_myserver" != "$myserver" ] && {
 	printf "You server address ip was changed! %s to %s\n" $old_myserver $myserver

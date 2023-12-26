@@ -40,9 +40,9 @@ check_box=browser.find_element("xpath",'//input[@name="admin_enabled"]')
 if not(check_box.is_selected()):
     check_box.click()
 # 管理界面路径
-input_box=browser.find_element("xpath",'//input[@name="admin_path"]')
-input_box.clear()
-input_box.send_keys('/admin')
+#input_box=browser.find_element("xpath",'//input[@name="admin_path"]')
+#input_box.clear()
+#input_box.send_keys('/admin')
 # 开启RESTful API
 check_box=browser.find_element("xpath",'//input[@name="api_enabled"]')
 if not(check_box.is_selected()):
